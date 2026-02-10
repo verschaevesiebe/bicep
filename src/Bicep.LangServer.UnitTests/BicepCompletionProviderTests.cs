@@ -50,6 +50,7 @@ namespace Bicep.LangServer.UnitTests
                 .AddSingleton<ISnippetsProvider, SnippetsProvider>()
                 .AddSingleton<ISettingsProvider, SettingsProvider>()
                 .AddSingleton<IModuleReferenceCompletionProvider, ModuleReferenceCompletionProvider>()
+                .AddSingleton<IAutoImportProvider, AutoImportProvider>()
                 .AddHttpClient<IPublicModuleMetadataProvider, PublicModuleMetadataProvider>()
                     .ConfigurePrimaryHttpMessageHandler(() => mockHttpMessageHandler).Services
                 .AddSingleton<ITelemetryProvider, TelemetryProvider>()

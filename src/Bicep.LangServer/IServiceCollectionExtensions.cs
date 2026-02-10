@@ -61,6 +61,7 @@ public static class IServiceCollectionExtensions
         .AddSingleton<IDeploymentHelper, DeploymentHelper>()
         .AddSingleton<ISettingsProvider, SettingsProvider>()
         .AddSingleton<IAzureContainerRegistriesProvider, AzureContainerRegistriesProvider>()
+        .AddSingleton<IAutoImportProvider, AutoImportProvider>()
         .AddSingleton(bicepLangServerOptions)
         .AddSingleton<DocumentSelectorFactory>();
 }

@@ -48,7 +48,8 @@ namespace Bicep.LangServer.UnitTests
                 BicepTestConstants.CreateMockTelemetryProvider().Object,
                 linterRulesProvider,
                 BicepTestConstants.SourceFileFactory,
-                BicepTestConstants.AuxiliaryFileCache);
+                BicepTestConstants.AuxiliaryFileCache,
+                new AutoImportProvider());
         }
 
         [NotNull]
@@ -303,7 +304,8 @@ namespace Bicep.LangServer.UnitTests
                 BicepTestConstants.CreateMockTelemetryProvider().Object,
                 linterRulesProvider,
                 BicepTestConstants.SourceFileFactory,
-                BicepTestConstants.AuxiliaryFileCache);
+                BicepTestConstants.AuxiliaryFileCache,
+                new AutoImportProvider());
 
             var uri = DocumentUri.File($"{TestContext.TestName}.bicep");
 
@@ -363,7 +365,8 @@ namespace Bicep.LangServer.UnitTests
                 BicepTestConstants.CreateMockTelemetryProvider().Object,
                 linterRulesProvider,
                 BicepTestConstants.SourceFileFactory,
-                BicepTestConstants.AuxiliaryFileCache);
+                BicepTestConstants.AuxiliaryFileCache,
+                new AutoImportProvider());
 
             // upsert should fail because of the mock fatal exception
             manager.OpenCompilation(uri, BaseVersion, "fake", languageId);
@@ -435,7 +438,8 @@ namespace Bicep.LangServer.UnitTests
                 BicepTestConstants.CreateMockTelemetryProvider().Object,
                 linterRulesProvider,
                 BicepTestConstants.SourceFileFactory,
-                BicepTestConstants.AuxiliaryFileCache);
+                BicepTestConstants.AuxiliaryFileCache,
+                new AutoImportProvider());
 
             // upsert should fail because of the mock fatal exception
             manager.OpenCompilation(uri, version, "fake", languageId);
@@ -543,7 +547,8 @@ module moduleB './moduleB.bicep' = {
                 BicepTestConstants.CreateMockTelemetryProvider().Object,
                 linterRulesProvider,
                 BicepTestConstants.SourceFileFactory,
-                BicepTestConstants.AuxiliaryFileCache);
+                BicepTestConstants.AuxiliaryFileCache,
+                new AutoImportProvider());
 
             diagsReceived.Should().BeEmpty();
 
@@ -929,7 +934,8 @@ param location string = 'testLocation'");
                 BicepTestConstants.CreateMockTelemetryProvider().Object,
                 linterRulesProvider,
                 BicepTestConstants.SourceFileFactory,
-                BicepTestConstants.AuxiliaryFileCache);
+                BicepTestConstants.AuxiliaryFileCache,
+                new AutoImportProvider());
         }
 
         private DocumentUri CreateUri(string languageId) => DocumentUri.File(this.TestContext.TestName + (languageId switch

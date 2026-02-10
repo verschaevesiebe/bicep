@@ -41,6 +41,7 @@ namespace Bicep.LanguageServer
         private readonly ILinterRulesProvider LinterRulesProvider;
         private readonly ISourceFileFactory sourceFileFactory;
         private readonly IAuxiliaryFileCache auxiliaryfileCache;
+        private readonly IAutoImportProvider autoImportProvider;
 
         // represents compilations of open bicep or param files
         private readonly ConcurrentDictionary<DocumentUri, CompilationContextBase> activeContexts = new();
@@ -53,7 +54,8 @@ namespace Bicep.LanguageServer
             ITelemetryProvider telemetryProvider,
             ILinterRulesProvider LinterRulesProvider,
             ISourceFileFactory sourceFileFactory,
-            IAuxiliaryFileCache auxiliaryFileCache)
+            IAuxiliaryFileCache auxiliaryFileCache,
+            IAutoImportProvider autoImportProvider)
         {
             this.server = server;
             this.provider = provider;
@@ -63,6 +65,7 @@ namespace Bicep.LanguageServer
             this.LinterRulesProvider = LinterRulesProvider;
             this.sourceFileFactory = sourceFileFactory;
             this.auxiliaryfileCache = auxiliaryFileCache;
+            this.autoImportProvider = autoImportProvider;
         }
 
         public void RefreshCompilation(DocumentUri documentUri, bool forceReloadAuxiliaryFiles)
@@ -368,6 +371,16 @@ namespace Bicep.LanguageServer
                         {
                             // store all the updated models as other compilations may be able to reuse them
                             modelLookup[sourceFile] = context.Compilation.GetSemanticModel(sourceFile);
+
+                            // Update the workspace export index for auto-import support
+                            if (sourceFile is BicepFile bicepFile)
+                            {
+                                var semanticModel = context.Compilation.GetSemanticModel(sourceFile);
+                                if (semanticModel is SemanticModel sm)
+                                {
+                                    this.autoImportProvider.UpdateFileExports(bicepFile.FileHandle.Uri, sm.Exports.Values);
+                                }
+                            }
                         }
 
                         // this completes immediately

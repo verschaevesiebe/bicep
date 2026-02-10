@@ -27,6 +27,7 @@ using Bicep.LanguageServer.Snippets;
 using Bicep.LanguageServer.Telemetry;
 using Bicep.LanguageServer.Utils;
 using Newtonsoft.Json.Linq;
+using Bicep.LanguageServer.Providers;
 using OmniSharp.Extensions.LanguageServer.Protocol.Models;
 using Range = OmniSharp.Extensions.LanguageServer.Protocol.Models.Range;
 using SymbolKind = Bicep.Core.Semantics.SymbolKind;
@@ -43,11 +44,16 @@ namespace Bicep.LanguageServer.Completions
 
         private readonly IModuleReferenceCompletionProvider moduleReferenceCompletionProvider;
         private readonly ISnippetsProvider snippetsProvider;
+        private readonly IAutoImportProvider autoImportProvider;
 
-        public BicepCompletionProvider(ISnippetsProvider snippetsProvider, IModuleReferenceCompletionProvider moduleReferenceCompletionProvider)
+        public BicepCompletionProvider(
+            ISnippetsProvider snippetsProvider,
+            IModuleReferenceCompletionProvider moduleReferenceCompletionProvider,
+            IAutoImportProvider autoImportProvider)
         {
             this.snippetsProvider = snippetsProvider;
             this.moduleReferenceCompletionProvider = moduleReferenceCompletionProvider;
+            this.autoImportProvider = autoImportProvider;
         }
 
         public async Task<IEnumerable<CompletionItem>> GetFilteredCompletions(Compilation compilation, BicepCompletionContext context, CancellationToken cancellationToken)
@@ -87,6 +93,7 @@ namespace Bicep.LanguageServer.Completions
                 .Concat(GetAssertValueCompletions(model, context))
                 .Concat(GetTypeArgumentCompletions(model, context))
                 .Concat(GetUsingWithCompletions(model, context))
+                .Concat(GetAutoImportCompletions(model, context))
                 .Concat(await moduleReferenceCompletionProvider.GetFilteredCompletions(model.SourceFile, context, cancellationToken));
         }
 
@@ -2279,5 +2286,141 @@ namespace Bicep.LanguageServer.Completions
 
         [GeneratedRegex(@"'br/(.*?):(.*?):?'?$", RegexOptions.IgnoreCase | RegexOptions.ExplicitCapture | RegexOptions.CultureInvariant)]
         private static partial Regex ModuleRegistryWithAliasPattern();
+
+        /// <summary>
+        /// Gets auto-import completions for exported symbols from other workspace files.
+        /// When a user types a symbol name that matches an export from another file,
+        /// this provides a completion that will automatically add the import statement.
+        /// </summary>
+        private IEnumerable<CompletionItem> GetAutoImportCompletions(SemanticModel model, BicepCompletionContext context)
+        {
+            // Only provide auto-import in contexts where types/variables can be used
+            // This includes type declarations, expressions, and various type contexts
+            if (!context.Kind.HasFlag(BicepCompletionContextKind.ParameterType) &&
+                !context.Kind.HasFlag(BicepCompletionContextKind.OutputType) &&
+                !context.Kind.HasFlag(BicepCompletionContextKind.TypeDeclarationValue) &&
+                !context.Kind.HasFlag(BicepCompletionContextKind.ObjectTypePropertyValue) &&
+                !context.Kind.HasFlag(BicepCompletionContextKind.UnionTypeMember) &&
+                !context.Kind.HasFlag(BicepCompletionContextKind.TypedLocalVariableType) &&
+                !context.Kind.HasFlag(BicepCompletionContextKind.TypedLambdaOutputType) &&
+                !context.Kind.HasFlag(BicepCompletionContextKind.Expression) &&
+                !context.Kind.HasFlag(BicepCompletionContextKind.VariableValue) &&
+                !context.Kind.HasFlag(BicepCompletionContextKind.ParameterDefaultValue))
+            {
+                return [];
+            }
+
+            var currentFileUri = model.SourceFile.FileHandle.Uri;
+
+            // Get names of symbols that are already imported in this file
+            var alreadyImportedNames = model.Root.ImportedSymbols
+                .Select(s => s.Name)
+                .ToHashSet(StringComparer.Ordinal);
+
+            // Also exclude locally declared symbols to avoid confusion
+            var localSymbolNames = model.Root.Declarations
+                .Select(d => d.Name)
+                .ToHashSet(StringComparer.Ordinal);
+
+            var availableExports = this.autoImportProvider
+                .GetAvailableExportsForFile(currentFileUri, alreadyImportedNames)
+                .Where(e => !localSymbolNames.Contains(e.Name));
+
+            return availableExports.Select(export => CreateAutoImportCompletion(export, model, context));
+        }
+
+        /// <summary>
+        /// Creates a completion item for an auto-import symbol.
+        /// </summary>
+        private CompletionItem CreateAutoImportCompletion(
+            WorkspaceExportedSymbol export,
+            SemanticModel model,
+            BicepCompletionContext context)
+        {
+            var currentFileUri = model.SourceFile.FileHandle.Uri;
+            var relativePath = this.autoImportProvider.GetRelativeImportPath(currentFileUri, export.SourceFileUri);
+
+            // Get file name for detail display
+            var fileName = Path.GetFileName(export.SourceFileUri.TryGetFilePath() ?? export.SourceFileUri.ToString());
+
+            // Determine completion kind based on export type
+            var completionKind = export.Kind switch
+            {
+                ExportMetadataKind.Type => CompletionItemKind.TypeParameter,
+                ExportMetadataKind.Variable => CompletionItemKind.Variable,
+                ExportMetadataKind.Function => CompletionItemKind.Function,
+                _ => CompletionItemKind.Reference
+            };
+
+            // Generate the import statement to be added
+            var importStatement = $"import {{ {export.Name} }} from '{relativePath}'\n";
+
+            // Find the position to insert the import (after any existing imports, or at the start)
+            var insertPosition = GetImportInsertPosition(model);
+
+            // Create the additional text edit for the import statement
+            var importEdit = new TextEdit
+            {
+                Range = new Range(insertPosition, insertPosition),
+                NewText = importStatement
+            };
+
+            var builder = CompletionItemBuilder.Create(completionKind, export.Name)
+                .WithSortText(GetSortText(export.Name, CompletionPriority.Low)) // Lower priority than local symbols
+                .WithPlainTextEdit(context.ReplacementRange, export.Name)
+                .WithAdditionalEdits(new TextEditContainer(importEdit))
+                .WithDetail($"Auto import from {fileName}")
+                .WithDocumentation(GetAutoImportDocumentation(export, relativePath));
+
+            return builder.Build();
+        }
+
+        /// <summary>
+        /// Gets the position where import statements should be inserted.
+        /// This is after any existing imports, provider declarations, or at the start of the file.
+        /// </summary>
+        private static Position GetImportInsertPosition(SemanticModel model)
+        {
+            var programSyntax = model.SourceFile.ProgramSyntax;
+            var lineStarts = model.SourceFile.LineStarts;
+
+            // Find the last import statement or extension/provider declaration
+            var lastImportOrExtension = programSyntax.Declarations
+                .Where(d => d is CompileTimeImportDeclarationSyntax or ExtensionDeclarationSyntax or TargetScopeSyntax)
+                .LastOrDefault();
+
+            if (lastImportOrExtension is not null)
+            {
+                // Insert after the last import/extension
+                var endOffset = lastImportOrExtension.GetEndPosition();
+                var (line, _) = TextCoordinateConverter.GetPosition(lineStarts, endOffset);
+                return new Position(line + 1, 0);
+            }
+
+            // No imports exist, insert at the beginning of the file
+            return new Position(0, 0);
+        }
+
+        /// <summary>
+        /// Generates documentation markdown for an auto-import completion.
+        /// </summary>
+        private static string GetAutoImportDocumentation(WorkspaceExportedSymbol export, string relativePath)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"**Auto Import**");
+            sb.AppendLine();
+            sb.AppendLine($"Adds import statement:");
+            sb.AppendLine($"```bicep");
+            sb.AppendLine($"import {{ {export.Name} }} from '{relativePath}'");
+            sb.AppendLine($"```");
+
+            if (!string.IsNullOrEmpty(export.Description))
+            {
+                sb.AppendLine();
+                sb.AppendLine(export.Description);
+            }
+
+            return sb.ToString();
+        }
     }
 }

@@ -13,6 +13,7 @@ using Bicep.Core.UnitTests.Utils;
 using Bicep.IO.FileSystem;
 using Bicep.LanguageServer;
 using Bicep.LanguageServer.Configuration;
+using Bicep.LanguageServer.Providers;
 using FluentAssertions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Moq;
@@ -257,7 +258,8 @@ namespace Bicep.LangServer.UnitTests.Configuration
                 BicepTestConstants.CreateMockTelemetryProvider().Object,
                 new LinterRulesProvider(),
                 sourceFileFactory,
-                BicepTestConstants.AuxiliaryFileCache);
+                BicepTestConstants.AuxiliaryFileCache,
+                new AutoImportProvider());
             bicepCompilationManager.OpenCompilation(DocumentUri.From(InMemoryFileResolver.GetFileUri(bicepFilePath)), null, bicepFileContents, LanguageConstants.LanguageId);
 
             var bicepConfigChangeHandler = new BicepConfigChangeHandler(bicepCompilationManager,
